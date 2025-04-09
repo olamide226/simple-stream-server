@@ -28,6 +28,13 @@ server.listen(PORT, () => {
     console.log(`Realtime server listening on *:${PORT}`);
 });
 
+// allow access control checks
+app.use((req, res, next) => {
+    res.header("Access-Control-Allow-Origin", "*");
+    res.header("Access-Control-Allow-Headers", "Origin, X-Requested-With, Content-Type, Accept");
+    next();
+});
+
 // Optional: Basic HTTP endpoint for health check
 app.get('/health', (req, res) => {
     res.status(200).send('OK');
@@ -60,7 +67,7 @@ app.post('/send-email', async (req, res) => {
             category: "Contact Form"
         }, {
             headers: {
-                'Authorization': 'Bearer 3d730ad1d7a89203a4266e9029704931',
+                'Authorization': `Bearer ${process.env.MAILTRAP_API_KEY}`,
                 'Content-Type': 'application/json'
             }
         });
