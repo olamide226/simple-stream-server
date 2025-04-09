@@ -1,0 +1,200 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Interactive Live Stream</title>
+    <link rel="stylesheet" href="style.css">
+    <script src="https://cdn.jsdelivr.net/npm/hls.js@latest"></script>
+    <script src="https://cdn.socket.io/4.7.4/socket.io.min.js"></script>
+</head>
+<body>
+    <div class="main-container">
+
+        <div class="video-section">
+            <h1>Interactive Live Stream</h1>
+            <div class="video-wrapper">
+                <video id="videoPlayer" controls autoplay muted playsinline></video>
+                <div id="reaction-overlay"></div> </div>
+            <div class="stream-info">
+                <span id="viewer-count">Viewers: <span class="count">--</span></span>
+                <div class="reactions">
+                    <button class="reaction-btn" data-reaction="👍">👍</button>
+                    <button class="reaction-btn" data-reaction="❤️">❤️</button>
+                    <button class="reaction-btn" data-reaction="😂">😂</button>
+                    <button class="reaction-btn" data-reaction="😮">😮</button>
+                    <button class="reaction-btn" data-reaction="🎉">🎉</button>
+                </div>
+            </div>
+            <p id="status">Connecting to stream...</p>
+        </div>
+
+        <div class="chat-section">
+            <h2>Live Chat</h2>
+            <div id="chat-messages">
+                </div>
+            <form id="chat-form">
+                <input type="text" id="username-input" placeholder="Your Name" required>
+                <input type="text" id="message-input" placeholder="Type your message..." autocomplete="off" required>
+                <button type="submit">Send</button>
+            </form>
+        </div>
+    </div>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', () => {
+            // --- HLS Video Setup ---
+            const video = document.getElementById('videoPlayer');
+            const statusElement = document.getElementById('status');
+            const streamKey = 'stream'; // Match this with OBS stream key
+            const hlsUrl = `/hls/${streamKey}/index.m3u8`;
+
+            statusElement.textContent = `Attempting to load: ${hlsUrl}`;
+
+            if (Hls.isSupported()) {
+                const hls = new Hls();
+                hls.loadSource(hlsUrl);
+                hls.attachMedia(video);
+                hls.on(Hls.Events.MANIFEST_PARSED, () => {
+                    statusElement.textContent = 'Playing live stream!';
+                    video.play().catch(e => console.warn("Autoplay prevented:", e));
+                });
+                hls.on(Hls.Events.ERROR, (event, data) => {
+                    console.error('HLS.js Error:', data);
+                    statusElement.textContent = `Stream Error: ${data.details}`;
+                    if (data.fatal && data.type === Hls.ErrorTypes.NETWORK_ERROR && data.details === 'manifestLoadError') {
+                         statusElement.textContent = 'Stream Offline or Starting... (404)';
+                    }
+                });
+            } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
+                video.src = hlsUrl;
+                video.addEventListener('loadedmetadata', () => {
+                    statusElement.textContent = 'Playing live stream (Native HLS)!';
+                    video.play().catch(e => console.warn("Autoplay prevented:", e));
+                });
+                 video.addEventListener('error', (e) => {
+                    console.error('Native HLS Error:', e);
+                     statusElement.textContent = 'Stream Offline or Error (Native).';
+                 });
+            } else {
+                statusElement.textContent = 'HLS playback not supported by your browser.';
+            }
+
+            // Attempt to unmute after interaction or successful autoplay
+            video.addEventListener('play', () => video.muted = false);
+
+            // --- Socket.IO Real-time Setup ---
+            const viewerCountElement = document.querySelector('#viewer-count .count');
+            const chatMessages = document.getElementById('chat-messages');
+            const chatForm = document.getElementById('chat-form');
+            const usernameInput = document.getElementById('username-input');
+            const messageInput = document.getElementById('message-input');
+            const reactionButtons = document.querySelectorAll('.reaction-btn');
+            const reactionOverlay = document.getElementById('reaction-overlay');
+
+            // Connect to the backend server (adjust URL if not localhost)
+            // Use the host machine's IP if accessing from another device on the network
+            const wsUrl = 'socket.devng.host';
+            const socket = io('https://' + wsUrl, {
+                transports: ['websocket', 'polling'],
+                secure: true
+            });
+
+            socket.on('connect', () => {
+                console.log('Connected to real-time server:', socket.id);
+                 statusElement.textContent = 'Stream playing | Chat connected';
+            });
+
+            socket.on('disconnect', () => {
+                console.log('Disconnected from real-time server.');
+                viewerCountElement.textContent = '--';
+                 statusElement.textContent = 'Stream playing | Chat disconnected';
+            });
+
+            socket.on('connect_error', (err) => {
+                console.error('Real-time connection error:', err);
+                 statusElement.textContent = 'Stream playing | Chat connection failed';
+            });
+
+            // Handle viewer count updates
+            socket.on('viewer count', (count) => {
+                viewerCountElement.textContent = count;
+            });
+
+            // Function to add a message to the chat display
+            const addChatMessage = (msg) => {
+                const item = document.createElement('div');
+                item.classList.add('chat-message');
+                item.innerHTML = `<span class="username">${escapeHtml(msg.user)}:</span> <span class="text">${escapeHtml(msg.text)}</span>`;
+                chatMessages.appendChild(item);
+                // Auto-scroll to the bottom
+                chatMessages.scrollTop = chatMessages.scrollHeight;
+            };
+
+             // Handle chat history
+            socket.on('chat history', (history) => {
+                chatMessages.innerHTML = ''; // Clear placeholder
+                history.forEach(msg => addChatMessage(msg));
+            });
+
+            // Handle incoming chat messages
+            socket.on('chat message', (msg) => {
+                addChatMessage(msg);
+            });
+
+             // Handle incoming reactions
+            socket.on('reaction', (reactionData) => {
+                displayReaction(reactionData.type);
+            });
+
+            // Send chat message on form submit
+            chatForm.addEventListener('submit', (e) => {
+                e.preventDefault();
+                const user = usernameInput.value.trim();
+                const text = messageInput.value.trim();
+                if (text && user) {
+                    socket.emit('chat message', { user: user, text: text });
+                    messageInput.value = ''; // Clear input field
+                } else if (!user) {
+                    alert('Please enter your name.');
+                    usernameInput.focus();
+                }
+            });
+
+            // Send reaction on button click
+            reactionButtons.forEach(button => {
+                button.addEventListener('click', () => {
+                    const reaction = button.getAttribute('data-reaction');
+                    socket.emit('reaction', reaction);
+                });
+            });
+
+            // Function to display floating reaction animation
+            const displayReaction = (reaction) => {
+                const reactionElement = document.createElement('span');
+                reactionElement.classList.add('floating-reaction');
+                reactionElement.textContent = reaction;
+                reactionElement.style.left = `${Math.random() * 80 + 10}%`; // Random horizontal position
+                reactionOverlay.appendChild(reactionElement);
+
+                // Remove the element after animation completes
+                setTimeout(() => {
+                    reactionElement.remove();
+                }, 2000); // Matches animation duration
+            }
+
+             // Simple HTML escaping function
+             function escapeHtml(unsafe) {
+                if (!unsafe) return '';
+                return unsafe
+                     .replace(/&/g, "&amp;")
+                     .replace(/</g, "&lt;")
+                     .replace(/>/g, "&gt;")
+                     .replace(/"/g, "&quot;")
+                     .replace(/'/g, "&#039;");
+             }
+             
+        });
+    </script>
+</body>
+</html>

@@ -1,0 +1,32 @@
+# docker-compose.yml
+
+services:
+  nginx-stream:
+    image: tiangolo/nginx-rtmp:latest
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./frontend:/usr/share/nginx/html:ro
+      - hls_data:/tmp/hls
+    ports:
+      - "1935:1935" # RTMP port
+      - "8080:8080" # HTTP port (Frontend + HLS)
+    restart: unless-stopped
+    depends_on: # Optional: Ensure backend starts before nginx if needed, though not strictly necessary here
+      - backend
+
+  backend:
+    build: ./backend # Build the image from the backend/Dockerfile
+    ports:
+      - "3000:3000" # WebSocket/Realtime server port
+    restart: unless-stopped
+    volumes:
+      # Optional: Mount code for development (remove for production build)
+      # - ./backend:/app
+      # - /app/node_modules # Prevent host node_modules from overwriting container's
+      - backend_logs:/app/logs # Example if you add file logging
+    environment:
+      - PORT=3000 # Pass port as environment variable
+
+volumes:
+  hls_data:
+  backend_logs: # Example volume
