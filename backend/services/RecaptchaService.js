@@ -1,4 +1,5 @@
-// backend/services/RecaptchaService.js
+const axios = require('axios');
+
 class RecaptchaService {
     constructor(secretKey) {
         this.secretKey = secretKey;
